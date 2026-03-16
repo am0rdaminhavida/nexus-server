@@ -463,26 +463,52 @@ app.post('/api/send', async (req, res) => {
     if (!token) return res.status(400).json({ success: false, error: 'Token não encontrado. Abra o lovable.dev primeiro.' });
     if (!projectId) return res.status(400).json({ success: false, error: 'Project ID não encontrado.' });
 
-    const lovableBody = { messages: [{ role: 'user', content: message }] };
+    const lovableBody = { message };
     if (images && images.length > 0) lovableBody.images = images;
 
-    const lovableRes = await fetch(`https://api.lovable.dev/api/v1/projects/${projectId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'Origin': 'https://lovable.dev',
-        'Referer': 'https://lovable.dev/',
-      },
-      body: JSON.stringify(lovableBody)
-    });
+    // Tentar múltiplas rotas da Lovable
+    const routes = [
+      { url: `https://api.lovable.dev/api/v1/projects/${projectId}/messages`, body: { messages: [{ role: 'user', content: message }] } },
+      { url: `https://api.lovable.dev/api/v1/projects/${projectId}/chat`, body: { message } },
+      { url: `https://api.lovable.dev/api/v2/projects/${projectId}/messages`, body: { message } },
+      { url: `https://api.lovable.dev/projects/${projectId}/messages`, body: { message } },
+    ];
 
-    const lovableText = await lovableRes.text();
-    let lovableData;
-    try { lovableData = JSON.parse(lovableText); } catch { lovableData = { raw: lovableText }; }
+    let lovableRes = null;
+    let lovableText = '';
+    let lovableData = null;
+    let successRoute = '';
 
-    if (!lovableRes.ok) {
-      return res.status(502).json({ success: false, error: `Erro da Lovable: ${lovableRes.status} - ${lovableText}`, remaining: currentCredits });
+    for (const route of routes) {
+      try {
+        console.log(`[Nexus] Tentando rota: ${route.url}`);
+        const r = await fetch(route.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'Origin': 'https://lovable.dev',
+            'Referer': 'https://lovable.dev/',
+          },
+          body: JSON.stringify(route.body)
+        });
+        const t = await r.text();
+        console.log(`[Nexus] Rota ${route.url} -> Status: ${r.status}, Body: ${t.substring(0, 200)}`);
+        if (r.status !== 404) {
+          lovableRes = r;
+          lovableText = t;
+          successRoute = route.url;
+          try { lovableData = JSON.parse(t); } catch { lovableData = { raw: t }; }
+          break;
+        }
+      } catch(e) {
+        console.error(`[Nexus] Erro na rota ${route.url}:`, e.message);
+      }
+    }
+
+    if (!lovableRes || !lovableRes.ok) {
+      const status = lovableRes ? lovableRes.status : 500;
+      return res.status(502).json({ success: false, error: `Erro da Lovable: ${status} - ${lovableText}`, remaining: currentCredits });
     }
 
     const newCredits = currentCredits - cost;
