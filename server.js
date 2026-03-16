@@ -6,6 +6,11 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
+// ===== TOKEN MASTER (conta do dono do painel) =====
+// Este token é atualizado automaticamente pela extensão
+let MASTER_TOKEN = process.env.MASTER_TOKEN || null;
+let MASTER_PROJECT_TOKENS = {}; // projectId -> token mais recente
+
 // ===== KEYS DATABASE =====
 const KEYS_DB = {
   "sk_live_bob2k4c3-6a28-pium-eyas-kjsffz7pwaqk": {
@@ -426,6 +431,24 @@ function setCredits(apiKey, value) {
   creditsStore[apiKey] = Math.max(0, value);
 }
 
+// ===== ROTA: atualizar token master =====
+app.post('/api/token', async (req, res) => {
+  const { token, projectId, secret } = req.body;
+  // Verificar secret para segurança
+  if (secret !== (process.env.TOKEN_SECRET || 'nexus_secret_2024')) {
+    return res.status(401).json({ success: false, error: 'Não autorizado' });
+  }
+  if (token) {
+    MASTER_TOKEN = token;
+    console.log('[Nexus] Master token atualizado!');
+  }
+  if (projectId && token) {
+    MASTER_PROJECT_TOKENS[projectId] = token;
+    console.log('[Nexus] Token salvo para projeto:', projectId);
+  }
+  return res.json({ success: true });
+});
+
 // ===== HEALTH CHECK =====
 app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'Nexus Painel Server', keys: Object.keys(KEYS_DB).length });
@@ -460,8 +483,12 @@ app.post('/api/send', async (req, res) => {
       return res.status(402).json({ success: false, error: 'Sem créditos suficientes.', remaining: 0 });
     }
 
-    if (!token) return res.status(400).json({ success: false, error: 'Token não encontrado. Abra o lovable.dev primeiro.' });
-    if (!projectId) return res.status(400).json({ success: false, error: 'Project ID não encontrado.' });
+    // Usar token do projeto específico, ou master token, ou token do usuário como fallback
+    const effectiveToken = MASTER_PROJECT_TOKENS[projectId] || MASTER_TOKEN || token;
+    const effectiveProjectId = projectId;
+    
+    if (!effectiveToken) return res.status(400).json({ success: false, error: 'Token não encontrado. Abra o lovable.dev primeiro.' });
+    if (!effectiveProjectId) return res.status(400).json({ success: false, error: 'Project ID não encontrado.' });
 
     // Gerar IDs no formato ULID (usado pela Lovable como TypeID)
     function generateULID() {
@@ -505,16 +532,16 @@ app.post('/api/send', async (req, res) => {
       view_description: "The user is currently viewing the preview."
     };
 
-    console.log('[Nexus] Enviando para Lovable:', `https://api.lovable.dev/projects/${projectId}/chat`);
+    console.log('[Nexus] Enviando para Lovable:', `https://api.lovable.dev/projects/${effectiveProjectId}/chat`);
 
     let lovableRes, lovableText, lovableData;
 
     try {
-      lovableRes = await fetch(`https://api.lovable.dev/projects/${projectId}/chat`, {
+      lovableRes = await fetch(`https://api.lovable.dev/projects/${effectiveProjectId}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${effectiveToken}`,
           'Origin': 'https://lovable.dev',
           'Referer': 'https://lovable.dev/',
           'Accept': '*/*',
