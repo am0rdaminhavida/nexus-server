@@ -463,17 +463,24 @@ app.post('/api/send', async (req, res) => {
     if (!token) return res.status(400).json({ success: false, error: 'Token não encontrado. Abra o lovable.dev primeiro.' });
     if (!projectId) return res.status(400).json({ success: false, error: 'Project ID não encontrado.' });
 
-    // Gerar IDs no formato TypeID correto da Lovable
-    function generateTypeId(prefix) {
-      const chars = '0123456789abcdefghjkmnpqrstvwxyz';
-      let id = '';
-      for (let i = 0; i < 26; i++) {
-        id += chars[Math.floor(Math.random() * chars.length)];
+    // Gerar IDs no formato ULID (usado pela Lovable como TypeID)
+    function generateULID() {
+      const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'.toLowerCase();
+      const now = Date.now();
+      let timeStr = '';
+      let t = now;
+      for (let i = 9; i >= 0; i--) {
+        timeStr = ENCODING[t % 32] + timeStr;
+        t = Math.floor(t / 32);
       }
-      return prefix + '_' + id;
+      let randomStr = '';
+      for (let i = 0; i < 16; i++) {
+        randomStr += ENCODING[Math.floor(Math.random() * 32)];
+      }
+      return timeStr + randomStr;
     }
-    const msgId = generateTypeId('umsg');
-    const aiMsgId = generateTypeId('aimsg');
+    const msgId = 'umsg_' + generateULID();
+    const aiMsgId = 'aimsg_' + generateULID();
 
     const lovableBody = {
       id: msgId,
