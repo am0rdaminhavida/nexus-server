@@ -463,47 +463,56 @@ app.post('/api/send', async (req, res) => {
     if (!token) return res.status(400).json({ success: false, error: 'Token não encontrado. Abra o lovable.dev primeiro.' });
     if (!projectId) return res.status(400).json({ success: false, error: 'Project ID não encontrado.' });
 
-    const lovableBody = { message };
-    if (images && images.length > 0) lovableBody.images = images;
+    // Gerar ID único para a mensagem
+    const msgId = 'umsg_' + Math.random().toString(36).substr(2, 9) + Math.random().toString(36).substr(2, 9);
+    const aiMsgId = 'aimsg_' + Math.random().toString(36).substr(2, 9) + Math.random().toString(36).substr(2, 9);
 
-    // Tentar múltiplas rotas da Lovable
-    const routes = [
-      { url: `https://api.lovable.dev/api/v1/projects/${projectId}/messages`, body: { messages: [{ role: 'user', content: message }] } },
-      { url: `https://api.lovable.dev/api/v1/projects/${projectId}/chat`, body: { message } },
-      { url: `https://api.lovable.dev/api/v2/projects/${projectId}/messages`, body: { message } },
-      { url: `https://api.lovable.dev/projects/${projectId}/messages`, body: { message } },
-    ];
+    const lovableBody = {
+      id: msgId,
+      ai_message_id: aiMsgId,
+      message: message,
+      files: images && images.length > 0 ? images : [],
+      chat_only: false,
+      client_logs: [],
+      current_page: "/",
+      current_viewport_dpr: 1,
+      current_viewport_height: 583,
+      current_viewport_width: 478,
+      integration_metadata: { browser: { preview_viewport_width: 478, preview_viewport_height: 583 } },
+      model: null,
+      network_requests: [],
+      optimisticImageUrls: [],
+      runtime_errors: [],
+      selected_elements: [],
+      session_replay: null,
+      thread_id: "main",
+      view: "preview",
+      view_description: "The user is currently viewing the preview."
+    };
 
-    let lovableRes = null;
-    let lovableText = '';
-    let lovableData = null;
-    let successRoute = '';
+    console.log('[Nexus] Enviando para Lovable:', `https://api.lovable.dev/projects/${projectId}/chat`);
 
-    for (const route of routes) {
-      try {
-        console.log(`[Nexus] Tentando rota: ${route.url}`);
-        const r = await fetch(route.url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'Origin': 'https://lovable.dev',
-            'Referer': 'https://lovable.dev/',
-          },
-          body: JSON.stringify(route.body)
-        });
-        const t = await r.text();
-        console.log(`[Nexus] Rota ${route.url} -> Status: ${r.status}, Body: ${t.substring(0, 200)}`);
-        if (r.status !== 404) {
-          lovableRes = r;
-          lovableText = t;
-          successRoute = route.url;
-          try { lovableData = JSON.parse(t); } catch { lovableData = { raw: t }; }
-          break;
-        }
-      } catch(e) {
-        console.error(`[Nexus] Erro na rota ${route.url}:`, e.message);
-      }
+    let lovableRes, lovableText, lovableData;
+
+    try {
+      lovableRes = await fetch(`https://api.lovable.dev/projects/${projectId}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'Origin': 'https://lovable.dev',
+          'Referer': 'https://lovable.dev/',
+          'Accept': '*/*',
+        },
+        body: JSON.stringify(lovableBody)
+      });
+
+      lovableText = await lovableRes.text();
+      console.log('[Nexus] Resposta Lovable:', lovableRes.status, lovableText.substring(0, 200));
+
+      try { lovableData = JSON.parse(lovableText); } catch { lovableData = { raw: lovableText }; }
+    } catch(e) {
+      return res.status(502).json({ success: false, error: 'Erro ao conectar com Lovable: ' + e.message, remaining: currentCredits });
     }
 
     if (!lovableRes || !lovableRes.ok) {
